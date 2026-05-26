@@ -417,6 +417,26 @@ header {
 }
 .map-marker:hover::after { opacity: 1; }
 
+/* Tryb gęsty (>12 sightingów): mniejsze markery z ostrym konturem zamiast
+   szerokiej poświaty — dzięki temu pojedyncze znaczniki pozostają czytelne
+   nawet w gęstych skupiskach. Poświata wraca dopiero przy najechaniu. */
+.map.dense .map-marker {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border-width: 1.5px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.75),
+    0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.map.dense .map-marker:hover {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.85),
+    0 0 14px var(--marker-color),
+    0 0 24px color-mix(in srgb, var(--marker-color) 70%, transparent);
+}
+
 /* Popup wyboru bossa po kliknięciu w mapę */
 .map-picker {
   position: absolute;

@@ -47,7 +47,7 @@ const BOSSES = {
   }
 };
 
-const POST_RESP_LINGER_MS = 5 * 60 * 1000;
+const POST_RESP_LINGER_MS = 15 * 60 * 1000;
 const WARN_THRESHOLD_MS   = 5 * 60 * 1000;
 const CRIT_THRESHOLD_MS   = 1 * 60 * 1000;
 
@@ -246,6 +246,10 @@ function renderSightings() {
 
   // Usuń stare markery
   map.querySelectorAll('.map-marker').forEach(el => el.remove());
+
+  // Tryb gęsty: przy dużej liczbie sightingów markery są mniejsze i bez
+  // poświaty, żeby nie zlewały się w jedną świecącą plamę
+  map.classList.toggle('dense', sightings.length > 12);
 
   // Zliczanie per boss dla legendy
   const counts = {};
