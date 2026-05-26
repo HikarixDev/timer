@@ -417,6 +417,23 @@ header {
 }
 .map-marker:hover::after { opacity: 1; }
 
+/* Markery przy krawędzi mapy: kotwiczymy dymek do środka, żeby overflow:hidden
+   go nie przyciął. tip-right rośnie w prawo, tip-left w lewo, tip-below w dół. */
+.map-marker.tip-right::after {
+  left: 50%;
+  right: auto;
+  transform: none;
+}
+.map-marker.tip-left::after {
+  left: auto;
+  right: 50%;
+  transform: none;
+}
+.map-marker.tip-below::after {
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+
 /* Tryb gęsty (>12 sightingów): mniejsze markery z ostrym konturem zamiast
    szerokiej poświaty — dzięki temu pojedyncze znaczniki pozostają czytelne
    nawet w gęstych skupiskach. Poświata wraca dopiero przy najechaniu. */

@@ -299,6 +299,11 @@ function renderSightings() {
     m.style.top  = (s.y * 100) + '%';
     m.dataset.name = boss.name;
     m.title = boss.name;
+    // Dymek nad markerem jest przycinany przez overflow:hidden mapy gdy marker
+    // leży blisko krawędzi. Kotwiczymy go więc do wnętrza mapy zależnie od pozycji.
+    if (s.x > 0.7)      m.classList.add('tip-left');
+    else if (s.x < 0.3) m.classList.add('tip-right');
+    if (s.y < 0.15)     m.classList.add('tip-below');
     m.addEventListener('click', (e) => {
       e.stopPropagation();
       deleteSighting(id);
