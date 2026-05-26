@@ -59,6 +59,24 @@ let notifiedAtZero = new Set();
 let beepCtx = null;
 let pendingDeletes = new Set();   // timery z usuwaniem w locie — chroni przed zduplikowanymi zapisami
 
+// Filtr mapy per boss — zbiór kluczy bossów UKRYTYCH na mapie. Trzymany
+// w localStorage, więc wybór przeżywa odświeżenie strony (filtr jest lokalny,
+// nie współdzielony przez Firebase).
+const FILTER_KEY = 'hwang-hidden-bosses';
+let hiddenBosses = loadHiddenBosses();
+
+function loadHiddenBosses() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(FILTER_KEY) || '[]');
+    // Pomijamy klucze spoza definicji, żeby stary stan nie blokował filtra
+    return new Set(arr.filter(k => k in BOSSES));
+  } catch { return new Set(); }
+}
+
+function saveHiddenBosses() {
+  try { localStorage.setItem(FILTER_KEY, JSON.stringify([...hiddenBosses])); } catch {}
+}
+
 // ─── 5. INIT ────────────────────────────────────────────────
 (function init() {
   if (firebaseConfig.apiKey === "WKLEJ_TUTAJ") {
@@ -275,6 +293,7 @@ function renderSightings() {
     const m = document.createElement('div');
     m.className = 'map-marker';
     m.dataset.id = id;
+    m.dataset.boss = s.boss;
     m.style.setProperty('--marker-color', boss.color);
     m.style.left = (s.x * 100) + '%';
     m.style.top  = (s.y * 100) + '%';
@@ -287,21 +306,53 @@ function renderSightings() {
     map.appendChild(m);
   });
 
-  // Legenda
+  // Legenda = filtr per boss. Klik na pozycję przełącza widoczność markerów
+  // danego bossa na mapie (stan zapisywany lokalnie w localStorage).
   const legend = document.getElementById('mapLegend');
   legend.innerHTML = '';
   Object.entries(BOSSES).forEach(([key, boss]) => {
-    const item = document.createElement('div');
-    item.className = 'legend-item';
+    const hidden = hiddenBosses.has(key);
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'legend-item' + (hidden ? ' inactive' : '');
+    item.dataset.boss = key;
+    item.title = hidden ? `Pokaż na mapie: ${boss.name}` : `Ukryj z mapy: ${boss.name}`;
+    item.setAttribute('aria-pressed', String(!hidden));
     item.innerHTML = `
       <span class="legend-dot" style="--dot-color: ${boss.color}"></span>
       <span>${boss.name}</span>
       <span class="count">${counts[key] || 0}</span>
     `;
+    item.addEventListener('click', () => toggleBossFilter(key));
     legend.appendChild(item);
   });
 
-  document.getElementById('sightingsCount').textContent = ids.length;
+  applyMarkerFilter();
+
+  // Licznik pokazuje widoczne / wszystkie, gdy filtr jest aktywny
+  const visible = ids.filter(id => {
+    const s = sightings[id];
+    return BOSSES[s.boss] && !hiddenBosses.has(s.boss);
+  }).length;
+  document.getElementById('sightingsCount').textContent =
+    hiddenBosses.size ? `${visible}/${ids.length}` : ids.length;
+}
+
+// Przełącza widoczność markerów danego bossa i przerysowuje legendę/markery.
+function toggleBossFilter(key) {
+  if (hiddenBosses.has(key)) hiddenBosses.delete(key);
+  else hiddenBosses.add(key);
+  saveHiddenBosses();
+  renderSightings();
+}
+
+// Ukrywa/pokazuje markery zgodnie z filtrem. Markery zostają w DOM (klasa
+// .filtered-out -> display:none), więc reconcile i animacja markerPop nie są
+// zaburzone przy przełączaniu filtra.
+function applyMarkerFilter() {
+  document.querySelectorAll('.map-marker').forEach(el => {
+    el.classList.toggle('filtered-out', hiddenBosses.has(el.dataset.boss));
+  });
 }
 
 // ════════════════════════════════════════════════════════════

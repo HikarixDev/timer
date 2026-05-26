@@ -515,6 +515,7 @@ header {
   flex-wrap: wrap;
 }
 
+/* Pozycja legendy = przycisk filtra per boss */
 .legend-item {
   display: flex;
   align-items: center;
@@ -522,6 +523,27 @@ header {
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
   color: var(--text-dim);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: opacity 0.15s, border-color 0.15s, background 0.15s;
+  user-select: none;
+}
+
+.legend-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-card-hover);
+}
+
+/* Boss ukryty z mapy — wygaszony, kropka bez poświaty */
+.legend-item.inactive {
+  opacity: 0.45;
+}
+.legend-item.inactive .legend-dot {
+  background: var(--text-faint);
+  box-shadow: none;
 }
 
 .legend-dot {
@@ -530,12 +552,16 @@ header {
   border-radius: 50%;
   background: var(--dot-color);
   box-shadow: 0 0 6px var(--dot-color);
+  transition: background 0.15s, box-shadow 0.15s;
 }
 
 .legend-item .count {
   color: var(--text);
   font-weight: 700;
 }
+
+/* Marker ukryty przez filtr per boss */
+.map-marker.filtered-out { display: none; }
 
 .map-hint {
   text-align: center;
