@@ -137,8 +137,12 @@ function saveCalibration(p1, p2) {
     const app = initializeApp(firebaseConfig);
     db = getDatabase(app);
     renderBosses();
-    setupMap();
+    // Dane (timery/sightingi) podłączamy najpierw i niezależnie od UI mapy —
+    // ewentualna awaria setupMap (np. stary, zcache'owany HTML bez nowych
+    // elementów) nie może wyczyścić widoku timerów.
     subscribe();
+    try { setupMap(); }
+    catch (e) { console.error('setupMap failed — coord/map UI disabled:', e); }
     setInterval(tick, 250);
   } catch (e) {
     console.error(e);
@@ -455,6 +459,7 @@ function updateCoordUI() {
   const input = document.getElementById('coordInput');
   const go = document.getElementById('coordGo');
   const status = document.getElementById('coordStatus');
+  if (!input || !go || !status) return;   // stary/zcache'owany HTML — pomiń
   const ready = !!calib;
   input.disabled = !ready;
   go.disabled = !ready;
