@@ -41,9 +41,10 @@ const BOSSES = {
   },
   'przywolywacz': {
     name: 'Ezoteryczny Przywoływacz',
-    respMs: 75 * 60 * 1000,    // 1h 15min
+    respMs: 80 * 60 * 1000,    // 1h 20min
     color: '#0ea5e9',
-    image: IMG_PRZYWOLYWACZ
+    image: IMG_PRZYWOLYWACZ,
+    note: 'Odpal timer po zabiciu Przywoływacza — NIE Reinkarnacji!'
   }
 };
 
@@ -169,12 +170,17 @@ function renderBosses() {
       ? 'CZAS RESPU: ?'
       : `RESP: ${formatRespLabel(boss.respMs)}`;
 
+    const noteHTML = boss.note
+      ? `<div class="boss-note">${boss.note}</div>`
+      : '';
+
     card.innerHTML = `
       <div class="boss-header">
         <div class="boss-avatar"></div>
         <div class="boss-name">${boss.name}</div>
         <div class="boss-resp">${respLabel}</div>
       </div>
+      ${noteHTML}
       <div class="ch-ring" data-boss="${key}"></div>
       <div class="boss-timers" data-boss-timers="${key}"></div>
     `;

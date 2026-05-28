@@ -201,6 +201,21 @@ header {
   font-family: 'JetBrains Mono', monospace;
 }
 
+.boss-note {
+  margin: -12px auto 20px;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
 /* ─── CHANNEL RING ────────────────────────────────────── */
 .ch-ring {
   position: relative;
