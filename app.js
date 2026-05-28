@@ -329,15 +329,6 @@ function setupMap() {
     if (e.key === 'Escape' && calMode) cancelCalibration();
   });
 
-  // Zmiana rozmiaru mapy zmienia odległości markerów w pikselach → przelicz
-  // rozsunięcie. Throttling przez requestAnimationFrame.
-  let relayoutQueued = false;
-  window.addEventListener('resize', () => {
-    if (relayoutQueued) return;
-    relayoutQueued = true;
-    requestAnimationFrame(() => { relayoutQueued = false; layoutMarkers(); });
-  });
-
   updateCoordUI();
 }
 
@@ -552,8 +543,6 @@ function renderSightings() {
     m.className = 'map-marker';
     m.dataset.id = id;
     m.dataset.boss = s.boss;
-    m.dataset.bx = s.x;             // pozycja bazowa 0–1 (do liczenia kolizji w pikselach)
-    m.dataset.by = s.y;
     m.style.setProperty('--marker-color', boss.color);
     m.style.left = (s.x * 100) + '%';
     m.style.top  = (s.y * 100) + '%';
@@ -594,7 +583,6 @@ function renderSightings() {
   });
 
   applyMarkerFilter();
-  layoutMarkers();   // rozsuń nakładające się markery (po filtrze, by liczyć tylko widoczne)
 
   // Licznik pokazuje widoczne / wszystkie, gdy filtr jest aktywny
   const visible = ids.filter(id => {
@@ -620,83 +608,6 @@ function applyMarkerFilter() {
   document.querySelectorAll('.map-marker').forEach(el => {
     el.classList.toggle('filtered-out', hiddenBosses.has(el.dataset.boss));
   });
-}
-
-// ─── ROZSUWANIE NAKŁADAJĄCYCH SIĘ MARKERÓW ("spiderfy") ─────
-// Markery sightingów grupują się w tych samych rejonach mapy i nakładają się
-// na siebie — wtedy nie widać, ile ich jest, ani którego usuwasz. Po każdym
-// renderze (i przy zmianie rozmiaru mapy) liczymy pozycje w pikselach, łączymy
-// markery bliższe niż próg w grupy, a każdą grupę rozkładamy w pierścień wokół
-// jej środka. Markery są przesuwane właściwością `translate` (osobną od
-// `transform`, więc hover/animacja popu działają dalej), a cienka „nóżka”
-// (::before) łączy rozsunięty marker z centrum skupiska. Pojedyncze markery
-// bez sąsiada nie ruszają się.
-const FAN_THRESHOLD_PX = 18;   // bliżej niż tyle px = traktujemy jako nakładające się
-
-function layoutMarkers() {
-  const map = document.getElementById('map');
-  if (!map) return;
-  const rect = map.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-
-  const markers = [...map.querySelectorAll('.map-marker')]
-    .filter(el => !el.classList.contains('filtered-out'));
-
-  // Reset poprzedniego rozsunięcia — layout jest idempotentny
-  markers.forEach(el => {
-    el.classList.remove('fanned');
-    el.style.removeProperty('--fan-x');
-    el.style.removeProperty('--fan-y');
-    el.style.removeProperty('--leader-len');
-    el.style.removeProperty('--leader-angle');
-  });
-
-  const pts = markers.map(el => ({
-    el,
-    px: parseFloat(el.dataset.bx) * rect.width,
-    py: parseFloat(el.dataset.by) * rect.height
-  }));
-
-  clusterPoints(pts, FAN_THRESHOLD_PX).forEach(group => {
-    if (group.length < 2) return;
-    const cx = group.reduce((s, p) => s + p.px, 0) / group.length;
-    const cy = group.reduce((s, p) => s + p.py, 0) / group.length;
-    const n = group.length;
-    // Promień pierścienia tak dobrany, by odstęp między sąsiadami ≳ 16 px
-    const R = Math.min(Math.max(13, n * 2.6), 46);
-    group.forEach((p, i) => {
-      const ang = (i / n) * Math.PI * 2 - Math.PI / 2;
-      const fx = cx + Math.cos(ang) * R - p.px;
-      const fy = cy + Math.sin(ang) * R - p.py;
-      p.el.classList.add('fanned');
-      p.el.style.setProperty('--fan-x', fx.toFixed(1) + 'px');
-      p.el.style.setProperty('--fan-y', fy.toFixed(1) + 'px');
-      // Nóżka biegnie od rozsuniętego markera z powrotem do środka skupiska
-      p.el.style.setProperty('--leader-len', R.toFixed(1) + 'px');
-      p.el.style.setProperty('--leader-angle', (ang * 180 / Math.PI + 180).toFixed(1) + 'deg');
-    });
-  });
-}
-
-// Grupowanie pojedynczym wiązaniem (union-find): markery połączone, gdy są
-// bliżej niż próg. N sightingów jest niewielkie, więc O(n²) wystarcza.
-function clusterPoints(pts, thresh) {
-  const parent = pts.map((_, i) => i);
-  const find = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
-  const t2 = thresh * thresh;
-  for (let i = 0; i < pts.length; i++) {
-    for (let j = i + 1; j < pts.length; j++) {
-      const dx = pts[i].px - pts[j].px, dy = pts[i].py - pts[j].py;
-      if (dx * dx + dy * dy <= t2) parent[find(i)] = find(j);
-    }
-  }
-  const groups = new Map();
-  pts.forEach((p, i) => {
-    const r = find(i);
-    if (!groups.has(r)) groups.set(r, []);
-    groups.get(r).push(p);
-  });
-  return [...groups.values()];
 }
 
 // ════════════════════════════════════════════════════════════

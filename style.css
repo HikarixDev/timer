@@ -391,28 +391,9 @@ header {
     0 0 0 1px rgba(0, 0, 0, 0.6),
     0 0 10px var(--marker-color),
     0 0 16px color-mix(in srgb, var(--marker-color) 60%, transparent);
-  /* translate = rozsunięcie kolizji (layoutMarkers), scale = hover — osobne od
-     `transform`, którego używa animacja markerPop, więc się nie gryzą. */
-  translate: var(--fan-x, 0) var(--fan-y, 0);
-  transition: translate 0.2s ease, scale 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s;
   z-index: 3;
   animation: markerPop 0.3s ease-out;
-}
-
-/* Nóżka rozsuniętego markera — biegnie do środka skupiska, pod spodem kropki */
-.map-marker.fanned::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: var(--leader-len, 0);
-  height: 1.5px;
-  background: rgba(255, 255, 255, 0.32);
-  transform-origin: 0 50%;
-  transform: rotate(var(--leader-angle, 0deg));
-  border-radius: 1px;
-  z-index: -1;
-  pointer-events: none;
 }
 
 @keyframes markerPop {
@@ -421,7 +402,7 @@ header {
 }
 
 .map-marker:hover {
-  scale: 1.4;
+  transform: scale(1.4);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.8),
     0 0 16px var(--marker-color),
