@@ -589,6 +589,130 @@ header {
   line-height: 1.6;
 }
 
+/* ─── COORD INPUT + KALIBRACJA ────────────────────────── */
+.coord-bar {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  margin-bottom: 8px;
+}
+
+.coord-form {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.coord-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  padding: 8px 12px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.coord-input::placeholder { color: var(--text-faint); letter-spacing: 0.06em; }
+.coord-input:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 18%, transparent);
+}
+.coord-input:disabled { opacity: 0.45; cursor: not-allowed; }
+.coord-input.shake { animation: shake 0.35s; border-color: var(--red); }
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+
+.coord-btn,
+.cal-btn {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+.coord-btn:hover:not(:disabled),
+.cal-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
+.coord-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.cal-btn.active {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.coord-status {
+  text-align: center;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  min-height: 16px;
+  margin-bottom: 10px;
+}
+.coord-status.error { color: var(--amber); }
+
+/* Mapa w trybie kalibracji — wyróżniona ramka */
+.map.calibrating {
+  border-color: var(--amber);
+  box-shadow:
+    0 0 0 1px var(--amber),
+    0 0 24px rgba(245, 158, 11, 0.25),
+    0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* Popup wpisania koordów punktu kalibracji (reuse stylu pickera) */
+.cal-popup {
+  position: absolute;
+  background: rgba(15, 15, 15, 0.98);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7);
+  z-index: 10;
+  animation: pickerIn 0.15s ease-out;
+}
+
+.cal-popup-form {
+  display: flex;
+  gap: 6px;
+}
+.cal-popup-form .coord-input { width: 120px; flex: none; padding: 6px 10px; font-size: 12px; }
+.cal-popup-form .coord-btn { padding: 6px 12px; }
+
+/* Podgląd koordów z gry pod kursorem */
+.map-coords {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  background: rgba(0, 0, 0, 0.82);
+  border: 1px solid var(--gold-dim);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--gold-bright);
+  pointer-events: none;
+  z-index: 6;
+}
+
 /* ─── FEED PANEL ──────────────────────────────────────── */
 .feed {
   display: grid;

@@ -40,15 +40,34 @@
       <div class="map-wrap">
         <div class="map" id="map">
           <!-- Markery dodawane dynamicznie. Klik na puste miejsce = popup wyboru bossa -->
+          <div class="map-coords" id="mapCoords" hidden></div>
         </div>
         <div class="map-picker" id="mapPicker" hidden>
           <div class="map-picker-label">Który boss?</div>
           <div class="map-picker-buttons" id="mapPickerBtns"></div>
         </div>
+        <div class="cal-popup" id="calPopup" hidden>
+          <div class="map-picker-label">Koordy tego punktu (x, y)</div>
+          <form class="cal-popup-form" id="calPopupForm">
+            <input type="text" id="calPopupInput" class="coord-input" placeholder="np. 934, 306" inputmode="numeric" autocomplete="off">
+            <button type="submit" class="coord-btn">OK</button>
+          </form>
+        </div>
       </div>
 
       <div class="map-legend" id="mapLegend"></div>
-      <div class="map-hint">Kliknij na mapę aby dodać znacznik. Kliknij znacznik aby usunąć. Kliknij bossa w legendzie aby ukryć/pokazać.</div>
+
+      <div class="coord-bar">
+        <form class="coord-form" id="coordForm">
+          <input type="text" id="coordInput" class="coord-input" placeholder="Wpisz koordy: 934, 306" inputmode="numeric" autocomplete="off">
+          <button type="submit" class="coord-btn" id="coordGo">Dodaj</button>
+        </form>
+        <button type="button" class="cal-btn" id="calBtn">Kalibruj</button>
+      </div>
+
+      <div class="coord-status" id="coordStatus"></div>
+
+      <div class="map-hint" id="mapHint">Kliknij na mapę aby dodać znacznik. Kliknij znacznik aby usunąć. Kliknij bossa w legendzie aby ukryć/pokazać.</div>
     </div>
 
     <div class="feed-panel">

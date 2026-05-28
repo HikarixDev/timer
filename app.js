@@ -5,7 +5,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
 import {
-  getDatabase, ref, push, onValue, remove
+  getDatabase, ref, push, onValue, remove, set
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-database.js";
 
 // ─── 1. FIREBASE CONFIG ─────────────────────────────────────
@@ -75,6 +75,51 @@ function loadHiddenBosses() {
 
 function saveHiddenBosses() {
   try { localStorage.setItem(FILTER_KEY, JSON.stringify([...hiddenBosses])); } catch {}
+}
+
+// ─── KALIBRACJA KOORDÓW ─────────────────────────────────────
+// Koordy z gry (te pod minimapą) są liniowe po całej mapie, ale nie znamy
+// rozmiaru tej konkretnej mapy ani czy obraz nie jest przycięty. Zamiast
+// zgadywać, wyznaczamy przekształcenie afiniczne (osobno X i Y) z dwóch
+// punktów odniesienia podanych przez gracza. calib = współczynniki:
+//   normX = ax*gameX + bx ,  normY = ay*gameY + by
+// Punkty źródłowe trzymamy w Firebase (współdzielone), współczynniki liczymy
+// lokalnie. Dwa punkty muszą różnić się i X, i Y (po przekątnej).
+let calibPoints = null;   // [{gx, gy, nx, ny}, …] — surowe punkty z Firebase
+let calib = null;         // {ax, bx, ay, by} — wyliczone współczynniki
+
+function computeCalib(p1, p2) {
+  if (!p1 || !p2) return null;
+  if (p1.gx === p2.gx || p1.gy === p2.gy) return null;   // brak przekątnej
+  const ax = (p2.nx - p1.nx) / (p2.gx - p1.gx);
+  const ay = (p2.ny - p1.ny) / (p2.gy - p1.gy);
+  return { ax, bx: p1.nx - ax * p1.gx, ay, by: p1.ny - ay * p1.gy };
+}
+
+// Koord z gry → pozycja znormalizowana 0–1 na mapie (lub null bez kalibracji).
+function gameToNorm(gx, gy) {
+  if (!calib) return null;
+  return { x: calib.ax * gx + calib.bx, y: calib.ay * gy + calib.by };
+}
+
+// Pozycja znormalizowana 0–1 → koord z gry (odwrotność, do podglądu na hover).
+function normToGame(nx, ny) {
+  if (!calib) return null;
+  return { x: (nx - calib.bx) / calib.ax, y: (ny - calib.by) / calib.ay };
+}
+
+// Sufiks dymka markera z koordami z gry (pusty gdy mapa nieskalibrowana).
+function coordSuffix(s) {
+  const g = normToGame(s.x, s.y);
+  return g ? ` · ${Math.round(g.x)}, ${Math.round(g.y)}` : '';
+}
+
+function saveCalibration(p1, p2) {
+  return set(ref(db, 'calibration'), { p1, p2, updatedAt: Date.now() })
+    .catch(err => {
+      console.error('saveCalibration failed', err);
+      alert('Nie udało się zapisać kalibracji: ' + err.message);
+    });
 }
 
 // ─── 5. INIT ────────────────────────────────────────────────
@@ -165,6 +210,15 @@ function formatRespLabel(ms) {
 //   MAP / SIGHTINGS
 // ════════════════════════════════════════════════════════════
 
+// Stan trybu kalibracji. calMode=true gdy gracz wskazuje punkty odniesienia.
+// calPending trzyma znorm. pozycję kliknięcia, dla której czekamy na wpisanie
+// koordów z gry. calCollected gromadzi gotowe punkty (max 2).
+let calMode = false;
+let calPending = null;     // {nx, ny} — punkt klikniętej pozycji oczekujący na koordy
+let calCollected = [];     // [{gx, gy, nx, ny}, …]
+
+const HINT_DEFAULT = 'Kliknij na mapę aby dodać znacznik. Kliknij znacznik aby usunąć. Kliknij bossa w legendzie aby ukryć/pokazać.';
+
 function setupMap() {
   const map = document.getElementById('map');
   map.style.setProperty('--map-image', `url("${IMG_MAP}")`);
@@ -191,7 +245,8 @@ function setupMap() {
     pickerBtns.appendChild(btn);
   });
 
-  // Klik na mapę = pokaż picker
+  // Klik na mapę = picker wyboru bossa, albo (w trybie kalibracji) wskazanie
+  // punktu odniesienia.
   map.addEventListener('click', (e) => {
     // Jeśli kliknięto na istniejący marker — nic nie rób (handler markera załatwi delete)
     if (e.target.classList.contains('map-marker')) return;
@@ -199,13 +254,31 @@ function setupMap() {
     const rect = map.getBoundingClientRect();
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-
-    // Pozycje markerów zapisujemy jako procenty 0–1 żeby były odporne na zmianę rozmiaru mapy
+    // Pozycje zapisujemy jako procenty 0–1 żeby były odporne na zmianę rozmiaru mapy
     const x = px / rect.width;
     const y = py / rect.height;
 
+    if (calMode) {
+      if (calPending) return;            // czekamy aż gracz wpisze koordy poprzedniego punktu
+      calPending = { nx: x, ny: y };
+      showCalPopup(px, py);
+      return;
+    }
+
     showPicker(px, py, x, y);
   });
+
+  // Podgląd koordów z gry pod kursorem (gdy mapa skalibrowana)
+  const coordsEl = document.getElementById('mapCoords');
+  map.addEventListener('mousemove', (e) => {
+    if (!calib) return;
+    const rect = map.getBoundingClientRect();
+    const g = normToGame((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+    if (!g) return;
+    coordsEl.hidden = false;
+    coordsEl.textContent = `${Math.round(g.x)}, ${Math.round(g.y)}`;
+  });
+  map.addEventListener('mouseleave', () => { coordsEl.hidden = true; });
 
   // Zamknięcie pickera po kliknięciu gdziekolwiek poza nim
   document.addEventListener('click', (e) => {
@@ -214,37 +287,181 @@ function setupMap() {
     if (e.target.closest('.map') && !e.target.classList.contains('map-marker')) return; // właśnie się otwiera
     hidePicker();
   }, { capture: true });
+
+  // Wpisanie koordów z gry → otwiera picker wyboru bossa w tym miejscu
+  document.getElementById('coordForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    placeByCoords();
+  });
+
+  // Przyciski / formularz kalibracji
+  document.getElementById('calBtn').addEventListener('click', toggleCalibration);
+  document.getElementById('calPopupForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    submitCalPoint();
+  });
+
+  // Escape przerywa kalibrację
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && calMode) cancelCalibration();
+  });
+
+  updateCoordUI();
+}
+
+// Generyczne pozycjonowanie popupu względem .map-wrap tak, by nie wychodził
+// poza obszar mapy. (px, py) to pozycja kliknięcia liczona od lewego-górnego
+// rogu mapy.
+function positionPopup(popup, px, py, estW, estH) {
+  const map = document.getElementById('map');
+  const mapRect = map.getBoundingClientRect();
+  const wrapRect = map.parentElement.getBoundingClientRect();
+  const offX = mapRect.left - wrapRect.left;
+  const offY = mapRect.top - wrapRect.top;
+
+  let left = offX + px - estW / 2;
+  let top  = offY + py + 14;
+  if (left < offX) left = offX;
+  if (left + estW > offX + mapRect.width) left = offX + mapRect.width - estW;
+  if (top + estH > offY + mapRect.height) top = offY + py - estH - 14;
+  if (top < offY) top = offY;
+  popup.style.left = left + 'px';
+  popup.style.top  = top + 'px';
 }
 
 function showPicker(px, py, normX, normY) {
   const picker = document.getElementById('mapPicker');
-  const map = document.getElementById('map');
-  const mapRect = map.getBoundingClientRect();
-
   picker.hidden = false;
   picker.dataset.x = normX;
   picker.dataset.y = normY;
-
-  // Pozycjonujemy picker względem .map-wrap (rodzica)
-  const wrap = map.parentElement;
-  const wrapRect = wrap.getBoundingClientRect();
-  const mapOffsetX = mapRect.left - wrapRect.left;
-  const mapOffsetY = mapRect.top - wrapRect.top;
-
-  // Dostosuj pozycję żeby picker nie wychodził za mapę
-  const pickerW = 180;  // szacowana szerokość
-  const pickerH = 80;
-  let left = mapOffsetX + px - pickerW / 2;
-  let top  = mapOffsetY + py + 14;
-  if (left < mapOffsetX) left = mapOffsetX;
-  if (left + pickerW > mapOffsetX + mapRect.width) left = mapOffsetX + mapRect.width - pickerW;
-  if (top + pickerH > mapOffsetY + mapRect.height) top = mapOffsetY + py - pickerH - 14;
-  picker.style.left = left + 'px';
-  picker.style.top  = top + 'px';
+  positionPopup(picker, px, py, 180, 80);
 }
 
 function hidePicker() {
   document.getElementById('mapPicker').hidden = true;
+}
+
+// ─── WSTAWIANIE PO KOORDACH ─────────────────────────────────
+function parseCoords(str) {
+  const m = str.trim().match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]+\s*(-?\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  return { gx: parseFloat(m[1]), gy: parseFloat(m[2]) };
+}
+
+function setCoordStatus(text, isError) {
+  const el = document.getElementById('coordStatus');
+  el.textContent = text || '';
+  el.classList.toggle('error', !!isError);
+}
+
+function placeByCoords() {
+  if (!calib) { setCoordStatus('Najpierw skalibruj mapę (przycisk Kalibruj).', true); return; }
+  const input = document.getElementById('coordInput');
+  const parsed = parseCoords(input.value);
+  if (!parsed) { setCoordStatus('Wpisz koordy w formacie: 934, 306', true); return; }
+
+  const n = gameToNorm(parsed.gx, parsed.gy);
+  if (n.x < -0.02 || n.x > 1.02 || n.y < -0.02 || n.y > 1.02) {
+    setCoordStatus(`Koordy ${parsed.gx}, ${parsed.gy} wypadają poza mapą.`, true);
+    return;
+  }
+
+  // Otwórz picker wyboru bossa w wyliczonym miejscu (spójnie z klikaniem)
+  const map = document.getElementById('map');
+  const rect = map.getBoundingClientRect();
+  showPicker(n.x * rect.width, n.y * rect.height, n.x, n.y);
+  setCoordStatus('Wybierz bossa dla punktu ' + parsed.gx + ', ' + parsed.gy);
+  input.value = '';
+}
+
+// ─── KALIBRACJA — przepływ UI ───────────────────────────────
+function toggleCalibration() {
+  if (calMode) { cancelCalibration(); return; }
+  calMode = true;
+  calPending = null;
+  calCollected = [];
+  hidePicker();
+  document.getElementById('calBtn').classList.add('active');
+  document.getElementById('calBtn').textContent = 'Anuluj';
+  document.getElementById('map').classList.add('calibrating');
+  updateCalHint();
+}
+
+function cancelCalibration() {
+  calMode = false;
+  calPending = null;
+  calCollected = [];
+  hideCalPopup();
+  document.getElementById('calBtn').classList.remove('active');
+  document.getElementById('calBtn').textContent = 'Kalibruj';
+  document.getElementById('map').classList.remove('calibrating');
+  document.getElementById('mapHint').textContent = HINT_DEFAULT;
+}
+
+function updateCalHint() {
+  const n = calCollected.length;
+  document.getElementById('mapHint').textContent =
+    `KALIBRACJA ${n + 1}/2 — kliknij na mapie miejsce, którego koordy z gry znasz` +
+    (n === 1 ? ' (najlepiej po przekątnej od pierwszego).' : '.');
+}
+
+function showCalPopup(px, py) {
+  const popup = document.getElementById('calPopup');
+  popup.hidden = false;
+  positionPopup(popup, px, py, 170, 80);
+  const input = document.getElementById('calPopupInput');
+  input.value = '';
+  input.focus();
+}
+
+function hideCalPopup() {
+  document.getElementById('calPopup').hidden = true;
+}
+
+function submitCalPoint() {
+  if (!calPending) return;
+  const input = document.getElementById('calPopupInput');
+  const parsed = parseCoords(input.value);
+  if (!parsed) { input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); return; }
+
+  calCollected.push({ gx: parsed.gx, gy: parsed.gy, nx: calPending.nx, ny: calPending.ny });
+  calPending = null;
+  hideCalPopup();
+
+  if (calCollected.length < 2) {
+    updateCalHint();
+    return;
+  }
+
+  // Mamy dwa punkty — sprawdź przekątną i zapisz
+  const [p1, p2] = calCollected;
+  if (computeCalib(p1, p2) === null) {
+    setCoordStatus('Punkty muszą różnić się X oraz Y — spróbuj ponownie.', true);
+    calCollected = [];
+    updateCalHint();
+    return;
+  }
+  saveCalibration(p1, p2);   // subskrypcja Firebase przeliczy calib i odświeży UI
+  cancelCalibration();
+  setCoordStatus('Mapa skalibrowana. Możesz wstawiać znaczniki po koordach.');
+}
+
+const WARN_NOCAL = 'Mapa nieskalibrowana — kliknij Kalibruj, aby wpisywać koordy.';
+
+// Włącza/wyłącza pole koordów i komunikat zależnie od dostępności kalibracji.
+// Gdy mapa staje się gotowa, czyścimy tylko nieaktualne ostrzeżenie — nie
+// nadpisujemy np. komunikatu o sukcesie kalibracji.
+function updateCoordUI() {
+  const input = document.getElementById('coordInput');
+  const go = document.getElementById('coordGo');
+  const status = document.getElementById('coordStatus');
+  const ready = !!calib;
+  input.disabled = !ready;
+  go.disabled = !ready;
+  input.placeholder = ready ? 'Wpisz koordy: 934, 306' : 'Najpierw kalibracja →';
+
+  if (!ready && !calMode) setCoordStatus(WARN_NOCAL, true);
+  else if (ready && status.textContent === WARN_NOCAL) setCoordStatus('');
 }
 
 function addSighting(bossKey, x, y) {
@@ -288,7 +505,15 @@ function renderSightings() {
     if (!boss) return;
     counts[s.boss] = (counts[s.boss] || 0) + 1;
 
-    if (existing.has(id)) return;   // już na mapie — nie odtwarzamy
+    // Dymek = nazwa bossa + (jeśli mapa skalibrowana) koordy z gry
+    const label = boss.name + coordSuffix(s);
+
+    if (existing.has(id)) {         // już na mapie — odświeżamy tylko dymek
+      const el = existing.get(id);
+      el.dataset.name = label;
+      el.title = label;
+      return;
+    }
 
     const m = document.createElement('div');
     m.className = 'map-marker';
@@ -297,8 +522,8 @@ function renderSightings() {
     m.style.setProperty('--marker-color', boss.color);
     m.style.left = (s.x * 100) + '%';
     m.style.top  = (s.y * 100) + '%';
-    m.dataset.name = boss.name;
-    m.title = boss.name;
+    m.dataset.name = label;
+    m.title = label;
     // Dymek nad markerem jest przycinany przez overflow:hidden mapy gdy marker
     // leży blisko krawędzi. Kotwiczymy go więc do wnętrza mapy zależnie od pozycji.
     if (s.x > 0.7)      m.classList.add('tip-left');
@@ -306,6 +531,7 @@ function renderSightings() {
     if (s.y < 0.15)     m.classList.add('tip-below');
     m.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (calMode) return;          // w trybie kalibracji nie usuwamy markerów
       deleteSighting(id);
     });
     map.appendChild(m);
@@ -385,6 +611,21 @@ function subscribe() {
     renderSightings();
   }, err => {
     console.error('sightings onValue error:', err);
+  });
+
+  onValue(ref(db, 'calibration'), snapshot => {
+    const v = snapshot.val();
+    if (v && v.p1 && v.p2) {
+      calibPoints = [v.p1, v.p2];
+      calib = computeCalib(v.p1, v.p2);
+    } else {
+      calibPoints = null;
+      calib = null;
+    }
+    updateCoordUI();
+    renderSightings();   // odśwież dymki markerów o koordy
+  }, err => {
+    console.error('calibration onValue error:', err);
   });
 }
 
