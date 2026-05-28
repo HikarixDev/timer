@@ -5,7 +5,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
 import {
-  getDatabase, ref, push, onValue, remove, set
+  getDatabase, ref, push, onValue, remove, set, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-database.js";
 
 // ─── 1. FIREBASE CONFIG ─────────────────────────────────────
@@ -59,6 +59,19 @@ let sightingsState = {};
 let notifiedAtZero = new Set();
 let beepCtx = null;
 let pendingDeletes = new Set();   // timery z usuwaniem w locie — chroni przed zduplikowanymi zapisami
+
+// Głos (Web Speech). voiceOn zapamiętane lokalnie; spokenSet pilnuje, by każdy
+// komunikat (1 min / respawn) padł tylko raz na timer.
+let voiceOn = localStorage.getItem('hwang-voice') === '1';
+let spokenSet = new Set();
+let plVoice = null;
+
+// Różnica między zegarem tego klienta a zegarem serwera Firebase
+// (serverTime ≈ Date.now() + serverTimeOffset). Dzięki temu timery liczą się
+// w czasie SERWERA, więc wszyscy gracze widzą tę samą sekundę niezależnie od
+// tego, jak ustawiony jest ich lokalny zegar.
+let serverTimeOffset = 0;
+function serverNow() { return Date.now() + serverTimeOffset; }
 
 // Filtr mapy per boss — zbiór kluczy bossów UKRYTYCH na mapie. Trzymany
 // w localStorage, więc wybór przeżywa odświeżenie strony (filtr jest lokalny,
@@ -609,6 +622,12 @@ function subscribe() {
     else setConnStatus('offline', 'Offline');
   });
 
+  // Firebase sam estymuje offset zegara względem serwera — śledzimy go, żeby
+  // wszystkie obliczenia czasu (poniżej) opierały się o czas serwera.
+  onValue(ref(db, '.info/serverTimeOffset'), snap => {
+    serverTimeOffset = snap.val() || 0;
+  });
+
   onValue(ref(db, 'timers'), snapshot => {
     timersState = snapshot.val() || {};
     renderTimers();
@@ -650,7 +669,7 @@ function startTimer(bossKey, channel) {
   const data = {
     boss: bossKey,
     channel: channel,
-    startedAt: Date.now(),
+    startedAt: serverTimestamp(),   // znacznik stempluje SERWER, nie zegar klikającego
     duration: boss.respMs
   };
   push(ref(db, 'timers'), data).catch(err => {
@@ -670,7 +689,7 @@ function deleteTimer(id) {
 }
 
 function renderTimers() {
-  const now = Date.now();
+  const now = serverNow();
 
   // Sprzątanie samego DOM-u jest odłączone od usuwania z bazy (patrz
   // cleanupExpiredTimers w pętli tick). Tutaj tylko odzwierciedlamy stan bazy
@@ -761,7 +780,7 @@ function reconcileTimerList(container, timers, emptyHTML) {
 // deleteTimer zapobiega dublowaniu zapisu w obrębie tej karty.
 function cleanupExpiredTimers() {
   if (!db) return;
-  const now = Date.now();
+  const now = serverNow();
   Object.entries(timersState).forEach(([id, t]) => {
     if (now > t.startedAt + t.duration + POST_RESP_LINGER_MS) deleteTimer(id);
   });
@@ -803,7 +822,7 @@ function buildTimerNode(t) {
 }
 
 function tick() {
-  const now = Date.now();
+  const now = serverNow();
   let anyRespawnNow = false;
 
   cleanupExpiredTimers();   // sprzątanie oparte o zegar, nie o zmiany danych
@@ -825,6 +844,7 @@ function tick() {
     } else if (remaining > 0) {
       cd.textContent = fmt(remaining);
       el.classList.add('critical');
+      voiceCue(el, '60', 'minuta');   // ostrzeżenie na minutę przed
     } else if (-remaining < POST_RESP_LINGER_MS) {
       cd.textContent = 'RESP +' + fmt(-remaining);
       el.classList.add('respawn');
@@ -835,6 +855,7 @@ function tick() {
         beep();
         notify(el);
       }
+      voiceCue(el, '0', 'respawn');
     } else {
       cd.textContent = '—';
     }
@@ -890,6 +911,54 @@ function beep() {
     osc.stop(ctx.currentTime + 0.4);
   } catch (e) {}
 }
+
+// ─── GŁOS (Web Speech) ──────────────────────────────────────
+function pickVoice() {
+  try {
+    const vs = speechSynthesis.getVoices();
+    plVoice = vs.find(v => v.lang && v.lang.toLowerCase().startsWith('pl')) || null;
+  } catch (e) {}
+}
+
+function speak(text) {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    if (!plVoice) pickVoice();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'pl-PL';
+    if (plVoice) u.voice = plVoice;
+    speechSynthesis.speak(u);   // kolejkuj — nie ucinaj poprzedniego komunikatu
+  } catch (e) {}
+}
+
+// Wypowiada komunikat dla danego timera raz na (timer, etap).
+function voiceCue(el, tag, word) {
+  if (!voiceOn) return;
+  const key = el.dataset.id + ':' + tag;
+  if (spokenSet.has(key)) return;
+  spokenSet.add(key);
+  const boss = BOSSES[el.dataset.boss];
+  const ch = (el.querySelector('.timer-ch')?.textContent || '').replace(/\D/g, '');
+  speak(`${boss.name}, kanał ${ch}, ${word}`);
+}
+
+(function wireVoice() {
+  const btn = document.getElementById('voiceBtn');
+  if (!btn) return;
+  btn.textContent = 'Głos: ' + (voiceOn ? 'on' : 'off');
+  btn.classList.toggle('granted', voiceOn);
+  if ('speechSynthesis' in window) {
+    pickVoice();
+    speechSynthesis.onvoiceschanged = pickVoice;
+  }
+  btn.addEventListener('click', () => {
+    voiceOn = !voiceOn;
+    localStorage.setItem('hwang-voice', voiceOn ? '1' : '0');
+    btn.textContent = 'Głos: ' + (voiceOn ? 'on' : 'off');
+    btn.classList.toggle('granted', voiceOn);
+    if (voiceOn) speak('Głos włączony');   // klik = gest użytkownika, odblokowuje audio
+  });
+})();
 
 document.getElementById('notifBtn').addEventListener('click', async () => {
   const btn = document.getElementById('notifBtn');

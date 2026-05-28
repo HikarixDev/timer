@@ -1,0 +1,12 @@
+{
+  "name": "hwang-overlay",
+  "version": "1.0.0",
+  "description": "Always-on-top overlay dla trackera bossów Świątyni Hwang",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
