@@ -19,34 +19,49 @@ const firebaseConfig = {
   appId: "1:532557757339:web:b9779641e8d09b2a347f3e"
 };
 
-// ─── 2. OBRAZY ──────────────────────────────────────────────
-const IMG_CHUNG_HEE    = "images/chung-hee.png";
-const IMG_OSTRZOWIEC   = "images/ostrzowiec.png";
-const IMG_PRZYWOLYWACZ = "images/przywolywacz.png";
-const IMG_MAP          = "images/map.png";
-
-// ─── 3. DEFINICJE BOSSÓW ────────────────────────────────────
-const BOSSES = {
-  'chung-hee': {
-    name: 'Chung-Hee',
-    respMs: 40 * 60 * 1000,
-    color: '#dc2626',
-    image: IMG_CHUNG_HEE
+// ─── 2. MAPY + BOSSOWIE ─────────────────────────────────────
+// Każda mapa ma własny zestaw bossów, liczbę kanałów i (opcjonalnie) obrazek
+// mapy do panelu sightingów. Dane w Firebase są rozdzielone per mapa przez
+// `dbPrefix`: Świątynia Hwang siedzi w korzeniu (zgodność wstecz z istniejącymi
+// danymi i z overlayem), a nowe mapy lądują pod `maps/<id>/…`.
+const MAPS = {
+  'hwang': {
+    name: 'Świątynia Hwang',
+    subtitle: 'Boss Respawn Tracker',
+    channels: 6,
+    dbPrefix: '',                       // korzeń — zgodność wstecz
+    mapImage: 'images/map.png',
+    bosses: {
+      'chung-hee':    { name: 'Chung-Hee',                respMs: 40 * 60 * 1000, color: '#dc2626', image: 'images/chung-hee.png' },
+      'ostrzowiec':   { name: 'Ezoteryczny Ostrzowiec',   respMs: 40 * 60 * 1000, color: '#7c3aed', image: 'images/ostrzowiec.png' },
+      'przywolywacz': { name: 'Ezoteryczny Przywoływacz', respMs: 80 * 60 * 1000, color: '#0ea5e9', image: 'images/przywolywacz.png',
+                        note: 'Odpal timer po zabiciu Przywoływacza — NIE Reinkarnacji!' }
+    }
   },
-  'ostrzowiec': {
-    name: 'Ezoteryczny Ostrzowiec',
-    respMs: 40 * 60 * 1000,
-    color: '#7c3aed',
-    image: IMG_OSTRZOWIEC
-  },
-  'przywolywacz': {
-    name: 'Ezoteryczny Przywoływacz',
-    respMs: 80 * 60 * 1000,    // 1h 20min
-    color: '#0ea5e9',
-    image: IMG_PRZYWOLYWACZ,
-    note: 'Odpal timer po zabiciu Przywoływacza — NIE Reinkarnacji!'
+  'weze': {
+    name: 'Wężowe Pole',
+    subtitle: 'Boss Respawn Tracker',
+    channels: 5,
+    dbPrefix: 'maps/weze/',
+    mapImage: null,                     // brak obrazka mapy → panel sightingów ukryty
+    bosses: {
+      'zadlak':     { name: 'Szkarłaczny Żądłak', respMs: 40 * 60 * 1000, color: '#e11d48', image: 'images/zadlak.png' },
+      'szeptotruj': { name: 'Szeptotruj',         respMs: 40 * 60 * 1000, color: '#16a34a', image: 'images/szeptotruj.png' },
+      'serpentor':  { name: 'Serpentor',          respMs: 50 * 60 * 1000, color: '#0d9488', image: 'images/serpentor.png' }
+    }
   }
 };
+
+// Aktywna mapa zapamiętana lokalnie. BOSSES/currentMap to referencje na aktywną
+// mapę — reszta kodu używa ich jak dawniej, a przy zmianie mapy podmieniamy je.
+const ACTIVE_MAP_KEY = 'hwang-active-map';
+let activeMapId = localStorage.getItem(ACTIVE_MAP_KEY);
+if (!MAPS[activeMapId]) activeMapId = 'hwang';
+let currentMap = MAPS[activeMapId];
+let BOSSES = currentMap.bosses;
+
+// Ścieżka w Firebase z prefiksem aktywnej mapy.
+function dbPath(sub) { return currentMap.dbPrefix + sub; }
 
 const POST_RESP_LINGER_MS = 15 * 60 * 1000;
 const WARN_THRESHOLD_MS   = 5 * 60 * 1000;
@@ -59,6 +74,7 @@ let sightingsState = {};
 let notifiedAtZero = new Set();
 let beepCtx = null;
 let pendingDeletes = new Set();   // timery z usuwaniem w locie — chroni przed zduplikowanymi zapisami
+let mapUnsubs = [];               // funkcje odpinające listenery aktywnej mapy (timers/sightings/calibration)
 
 // Głos (Web Speech). voiceOn zapamiętane lokalnie; spokenSet pilnuje, by każdy
 // komunikat (1 min / respawn) padł tylko raz na timer.
@@ -76,19 +92,21 @@ function serverNow() { return Date.now() + serverTimeOffset; }
 // Filtr mapy per boss — zbiór kluczy bossów UKRYTYCH na mapie. Trzymany
 // w localStorage, więc wybór przeżywa odświeżenie strony (filtr jest lokalny,
 // nie współdzielony przez Firebase).
-const FILTER_KEY = 'hwang-hidden-bosses';
+// Klucz filtra jest per mapa — bossowie różnych map mają różne klucze, więc
+// nie mogą dzielić jednej listy ukrytych.
+function filterKey() { return 'hwang-hidden-bosses:' + activeMapId; }
 let hiddenBosses = loadHiddenBosses();
 
 function loadHiddenBosses() {
   try {
-    const arr = JSON.parse(localStorage.getItem(FILTER_KEY) || '[]');
+    const arr = JSON.parse(localStorage.getItem(filterKey()) || '[]');
     // Pomijamy klucze spoza definicji, żeby stary stan nie blokował filtra
     return new Set(arr.filter(k => k in BOSSES));
   } catch { return new Set(); }
 }
 
 function saveHiddenBosses() {
-  try { localStorage.setItem(FILTER_KEY, JSON.stringify([...hiddenBosses])); } catch {}
+  try { localStorage.setItem(filterKey(), JSON.stringify([...hiddenBosses])); } catch {}
 }
 
 // ─── KALIBRACJA KOORDÓW ─────────────────────────────────────
@@ -129,7 +147,7 @@ function coordSuffix(s) {
 }
 
 function saveCalibration(p1, p2) {
-  return set(ref(db, 'calibration'), { p1, p2, updatedAt: Date.now() })
+  return set(ref(db, dbPath('calibration')), { p1, p2, updatedAt: Date.now() })
     .catch(err => {
       console.error('saveCalibration failed', err);
       alert('Nie udało się zapisać kalibracji: ' + err.message);
@@ -150,11 +168,14 @@ function saveCalibration(p1, p2) {
   try {
     const app = initializeApp(firebaseConfig);
     db = getDatabase(app);
+    buildMapTabs();
+    applyMapChrome();
     renderBosses();
     // Dane (timery/sightingi) podłączamy najpierw i niezależnie od UI mapy —
     // ewentualna awaria setupMap (np. stary, zcache'owany HTML bez nowych
     // elementów) nie może wyczyścić widoku timerów.
-    subscribe();
+    subscribeGlobal();
+    subscribeMap();
     try { setupMap(); }
     catch (e) { console.error('setupMap failed — coord/map UI disabled:', e); }
     setInterval(tick, 250);
@@ -163,6 +184,76 @@ function saveCalibration(p1, p2) {
     setConnStatus('error', 'Błąd konfiguracji');
   }
 })();
+
+// ════════════════════════════════════════════════════════════
+//   MAPY — zakładki i przełączanie
+// ════════════════════════════════════════════════════════════
+
+function buildMapTabs() {
+  const nav = document.getElementById('mapTabs');
+  if (!nav) return;
+  nav.innerHTML = '';
+  Object.entries(MAPS).forEach(([id, m]) => {
+    const btn = document.createElement('button');
+    btn.className = 'map-tab';
+    btn.dataset.map = id;
+    btn.textContent = m.name;
+    btn.addEventListener('click', () => switchMap(id));
+    nav.appendChild(btn);
+  });
+}
+
+// Ustawia nagłówek, aktywną zakładkę, obrazek mapy i widoczność panelu mapy
+// zgodnie z aktywną mapą. Mapa bez obrazka (np. Wężowe Pole) chowa cały panel
+// sightingów, a feed timerów rozciąga się na całą szerokość.
+function applyMapChrome() {
+  const titleEl = document.getElementById('pageTitle');
+  const subEl   = document.getElementById('pageSubtitle');
+  if (titleEl) titleEl.textContent = currentMap.name;
+  if (subEl)   subEl.textContent   = currentMap.subtitle;
+
+  document.querySelectorAll('.map-tab').forEach(b =>
+    b.classList.toggle('active', b.dataset.map === activeMapId));
+
+  const hasMap = !!currentMap.mapImage;
+  const mapPanel  = document.getElementById('mapPanel');
+  const lowerGrid = document.getElementById('lowerGrid');
+  if (mapPanel)  mapPanel.hidden = !hasMap;
+  if (lowerGrid) lowerGrid.classList.toggle('no-map', !hasMap);
+  if (hasMap) {
+    const map = document.getElementById('map');
+    if (map) map.style.setProperty('--map-image', `url("${currentMap.mapImage}")`);
+  }
+}
+
+// Przełącza aktywną mapę: czyści stan przejściowy (żeby dane poprzedniej mapy
+// nie przeciekły), przerysowuje UI i przepina listenery Firebase na nowe ścieżki.
+function switchMap(mapId) {
+  if (mapId === activeMapId || !MAPS[mapId]) return;
+  if (calMode) cancelCalibration();
+
+  activeMapId = mapId;
+  try { localStorage.setItem(ACTIVE_MAP_KEY, mapId); } catch {}
+  currentMap = MAPS[mapId];
+  BOSSES = currentMap.bosses;
+
+  timersState = {};
+  sightingsState = {};
+  calib = null;
+  calibPoints = null;
+  notifiedAtZero.clear();
+  spokenSet.clear();
+  pendingDeletes.clear();
+  hiddenBosses = loadHiddenBosses();
+
+  applyMapChrome();
+  renderBosses();
+  renderMapPickerButtons();
+  renderTimers();
+  renderSightings();
+  updateCoordUI();
+  subscribeMap();
+}
 
 // ════════════════════════════════════════════════════════════
 //   BOSS CARDS
@@ -176,7 +267,7 @@ function renderBosses() {
     const card = document.createElement('div');
     card.className = 'boss-card';
     card.style.setProperty('--boss-color', boss.color);
-    card.style.setProperty('--boss-image', `url("${boss.image}")`);
+    if (boss.image) card.style.setProperty('--boss-image', `url("${boss.image}")`);
 
     const disabled = boss.respMs == null;
     const respLabel = disabled
@@ -199,8 +290,9 @@ function renderBosses() {
     `;
 
     const ring = card.querySelector('.ch-ring');
-    for (let i = 1; i <= 6; i++) {
-      const angle = (i - 1) * 60 - 90;
+    const chCount = currentMap.channels;
+    for (let i = 1; i <= chCount; i++) {
+      const angle = (i - 1) * (360 / chCount) - 90;
       const rad = angle * Math.PI / 180;
       const r = 80;
       const cx = 110 + Math.cos(rad) * r;
@@ -244,29 +336,11 @@ const HINT_DEFAULT = 'Kliknij na mapę aby dodać znacznik. Kliknij znacznik aby
 
 function setupMap() {
   const map = document.getElementById('map');
-  map.style.setProperty('--map-image', `url("${IMG_MAP}")`);
-
   const picker = document.getElementById('mapPicker');
-  const pickerBtns = document.getElementById('mapPickerBtns');
 
-  // Buduje przyciski wyboru bossa w pickerze
-  pickerBtns.innerHTML = '';
-  Object.entries(BOSSES).forEach(([key, boss]) => {
-    const btn = document.createElement('button');
-    btn.className = 'map-picker-btn';
-    btn.style.setProperty('--boss-color', boss.color);
-    btn.style.setProperty('--boss-image', `url("${boss.image}")`);
-    btn.dataset.boss = key;
-    btn.dataset.name = boss.name;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const x = parseFloat(picker.dataset.x);
-      const y = parseFloat(picker.dataset.y);
-      addSighting(key, x, y);
-      hidePicker();
-    });
-    pickerBtns.appendChild(btn);
-  });
+  // Przyciski wyboru bossa w pickerze zależą od aktywnej mapy — budujemy je
+  // osobną funkcją, którą wołamy też przy zmianie mapy.
+  renderMapPickerButtons();
 
   // Klik na mapę = picker wyboru bossa, albo (w trybie kalibracji) wskazanie
   // punktu odniesienia.
@@ -330,6 +404,30 @@ function setupMap() {
   });
 
   updateCoordUI();
+}
+
+// Buduje przyciski wyboru bossa w pickerze dla aktywnej mapy.
+function renderMapPickerButtons() {
+  const picker = document.getElementById('mapPicker');
+  const pickerBtns = document.getElementById('mapPickerBtns');
+  if (!picker || !pickerBtns) return;
+  pickerBtns.innerHTML = '';
+  Object.entries(BOSSES).forEach(([key, boss]) => {
+    const btn = document.createElement('button');
+    btn.className = 'map-picker-btn';
+    btn.style.setProperty('--boss-color', boss.color);
+    if (boss.image) btn.style.setProperty('--boss-image', `url("${boss.image}")`);
+    btn.dataset.boss = key;
+    btn.dataset.name = boss.name;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const x = parseFloat(picker.dataset.x);
+      const y = parseFloat(picker.dataset.y);
+      addSighting(key, x, y);
+      hidePicker();
+    });
+    pickerBtns.appendChild(btn);
+  });
 }
 
 // Generyczne pozycjonowanie popupu względem .map-wrap tak, by nie wychodził
@@ -489,7 +587,7 @@ function updateCoordUI() {
 }
 
 function addSighting(bossKey, x, y) {
-  push(ref(db, 'sightings'), { boss: bossKey, x, y, addedAt: Date.now() })
+  push(ref(db, dbPath('sightings')), { boss: bossKey, x, y, addedAt: Date.now() })
     .catch(err => {
       console.error('addSighting failed', err);
       alert('Nie udało się zapisać sightingu: ' + err.message);
@@ -497,7 +595,7 @@ function addSighting(bossKey, x, y) {
 }
 
 function deleteSighting(id) {
-  remove(ref(db, 'sightings/' + id)).catch(err => console.error('delete sighting failed', err));
+  remove(ref(db, dbPath('sightings/' + id))).catch(err => console.error('delete sighting failed', err));
 }
 
 function renderSightings() {
@@ -614,7 +712,8 @@ function applyMarkerFilter() {
 //   FIREBASE SUBSCRIPTION
 // ════════════════════════════════════════════════════════════
 
-function subscribe() {
+// Listenery niezależne od mapy — podłączane raz na starcie.
+function subscribeGlobal() {
   setConnStatus('connecting', 'Łączenie...');
 
   onValue(ref(db, '.info/connected'), snap => {
@@ -627,23 +726,30 @@ function subscribe() {
   onValue(ref(db, '.info/serverTimeOffset'), snap => {
     serverTimeOffset = snap.val() || 0;
   });
+}
 
-  onValue(ref(db, 'timers'), snapshot => {
+// Listenery danych AKTYWNEJ mapy (timery/sightingi/kalibracja). Przy zmianie
+// mapy najpierw odpinamy poprzednie, potem podpinamy nowe ścieżki.
+function subscribeMap() {
+  mapUnsubs.forEach(fn => { try { fn(); } catch {} });
+  mapUnsubs = [];
+
+  mapUnsubs.push(onValue(ref(db, dbPath('timers')), snapshot => {
     timersState = snapshot.val() || {};
     renderTimers();
   }, err => {
     console.error(err);
     setConnStatus('error', 'Błąd: ' + err.code);
-  });
+  }));
 
-  onValue(ref(db, 'sightings'), snapshot => {
+  mapUnsubs.push(onValue(ref(db, dbPath('sightings')), snapshot => {
     sightingsState = snapshot.val() || {};
     renderSightings();
   }, err => {
     console.error('sightings onValue error:', err);
-  });
+  }));
 
-  onValue(ref(db, 'calibration'), snapshot => {
+  mapUnsubs.push(onValue(ref(db, dbPath('calibration')), snapshot => {
     const v = snapshot.val();
     if (v && v.p1 && v.p2) {
       calibPoints = [v.p1, v.p2];
@@ -656,7 +762,7 @@ function subscribe() {
     renderSightings();   // odśwież dymki markerów o koordy
   }, err => {
     console.error('calibration onValue error:', err);
-  });
+  }));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -672,7 +778,7 @@ function startTimer(bossKey, channel) {
     startedAt: serverTimestamp(),   // znacznik stempluje SERWER, nie zegar klikającego
     duration: boss.respMs
   };
-  push(ref(db, 'timers'), data).catch(err => {
+  push(ref(db, dbPath('timers')), data).catch(err => {
     console.error('startTimer failed', err);
     alert('Nie udało się zapisać timera: ' + err.message);
   });
@@ -681,7 +787,7 @@ function startTimer(bossKey, channel) {
 function deleteTimer(id) {
   if (pendingDeletes.has(id)) return;   // usuwanie już w toku — nie dubluj zapisu
   pendingDeletes.add(id);
-  remove(ref(db, 'timers/' + id)).catch(err => {
+  remove(ref(db, dbPath('timers/' + id))).catch(err => {
     console.error('delete failed', err);
     pendingDeletes.delete(id);          // pozwól ponowić po błędzie
   });
@@ -791,7 +897,7 @@ function buildTimerNode(t) {
   const node = document.createElement('div');
   node.className = 'timer';
   node.style.setProperty('--boss-color', boss.color);
-  node.style.setProperty('--boss-image', `url("${boss.image}")`);
+  if (boss.image) node.style.setProperty('--boss-image', `url("${boss.image}")`);
   node.dataset.id = t.id;
   node.dataset.boss = t.boss;
   node.dataset.startedAt = t.startedAt;
@@ -862,8 +968,8 @@ function tick() {
   });
 
   document.title = anyRespawnNow
-    ? '🔴 RESP! — Świątynia Hwang'
-    : 'Świątynia Hwang — Timery Bossów';
+    ? '🔴 RESP! — ' + currentMap.name
+    : currentMap.name + ' — Timery Bossów';
 }
 
 function fmt(ms) {

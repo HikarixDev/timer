@@ -78,6 +78,34 @@ header {
   color: var(--text-dim);
 }
 
+/* ─── ZAKŁADKI MAP ────────────────────────────────────── */
+.map-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.map-tab {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  padding: 8px 18px;
+  border-radius: 6px;
+  font-family: 'Cinzel', serif;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.map-tab:hover { border-color: var(--gold-dim); color: var(--gold); }
+.map-tab.active {
+  border-color: var(--gold-dim);
+  color: var(--gold-bright);
+  background: linear-gradient(180deg, rgba(201, 169, 97, 0.12), rgba(201, 169, 97, 0.04));
+  box-shadow: 0 0 16px rgba(201, 169, 97, 0.15);
+}
+
 .conn-dot {
   width: 8px;
   height: 8px;
@@ -318,6 +346,9 @@ header {
 @media (max-width: 960px) {
   .lower-grid { grid-template-columns: 1fr; }
 }
+
+/* Mapa bez obrazka (np. Wężowe Pole): panel sightingów schowany, feed na całość */
+.lower-grid.no-map { grid-template-columns: 1fr; }
 
 .panel-title {
   font-family: 'Cinzel', serif;
