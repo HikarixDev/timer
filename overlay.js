@@ -38,7 +38,7 @@ const MAPS = {
     bosses: {
       'zadlak':     { name: 'Szkarłaczny Żądłak', short: 'Żądłak',     respMs: 40 * 60 * 1000, color: '#e11d48' },
       'szeptotruj': { name: 'Szeptotruj',         short: 'Szeptotruj', respMs: 40 * 60 * 1000, color: '#16a34a' },
-      'serpentor':  { name: 'Serpentor',          short: 'Serpentor',  respMs: 50 * 60 * 1000, color: '#0d9488' }
+      'serpentor':  { name: 'Serpentor',          short: 'Serpentor',  respMs: 45 * 60 * 1000, color: '#0d9488' }
     }
   }
 };
